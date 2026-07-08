@@ -1,8 +1,6 @@
-# OneTeam CRM - Vercel static version
+OneTeam Core v0.2
 
-Demo login:
-- leader / demo123
-- obchodnik / demo123
-- management / demo123
-
-Data jsou v této první online verzi uložená v prohlížeči přes localStorage.
+Demo účty:
+leader / demo123
+obchodnik / demo123
+management / demo123

@@ -1,281 +1,33 @@
 
-import React, {useMemo, useState} from "react";
-import { createRoot } from "react-dom/client";
-import "./style.css";
-
-const initialUsers = [
-  {id:1, name:"Team Leader", username:"leader", password:"demo123", role:"leader"},
-  {id:2, name:"Petr Obchodník", username:"obchodnik", password:"demo123", role:"seller"},
-  {id:3, name:"Vedení", username:"management", password:"demo123", role:"management"},
-];
-
-const initialOrders = [
-  {id:1, owner_id:2, order_number:"2026-1001", customer_name:"Jan Novák", phone:"777123456", customer_type:"RČ", deal_type:"O2 Spolu", product_group:"Postpaid", tariff:"NEO+ Zlatý", status:"V realizaci", final_commission:1200},
-  {id:2, owner_id:2, order_number:"2026-1002", customer_name:"Petr Dvořák", phone:"777888999", customer_type:"IČO", deal_type:"O2 Profi", product_group:"PRO", tariff:"O2 Internet MAX Pro 100", status:"Čekám na OKU", final_commission:1360},
-  {id:3, owner_id:2, order_number:"2026-1003", customer_name:"Martin Král", phone:"777555222", customer_type:"RČ", deal_type:"Bez Spolu", product_group:"TV", tariff:"Oneplay Komfort", status:"Dokončeno", final_commission:700},
-];
-
-function useStore(key, initial) {
-  const [value, setValue] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(key)) || initial; }
-    catch { return initial; }
-  });
-  const save = (v) => {
-    setValue(v);
-    localStorage.setItem(key, JSON.stringify(v));
-  };
-  return [value, save];
-}
-
-function calcCommission(data) {
-  let base = Number(data.base_commission || 1600);
-  if (data.deal_type === "O2 Spolu") base = 1200;
-  const profi = Number(data.profi_percent || 0);
-  const d1 = Number(data.discount1 || 0);
-  const d2 = Number(data.discount2 || 0);
-  const hwb = Number(data.hwb_amount || 0);
-  const lco = Number(data.lco_amount || 0);
-  const hwbImpact = hwb ? -(hwb / 1.21 / 24 * 3) : 0;
-  const lcoImpact = lco ? -(lco * 3) : 0;
-  return Math.round(base * (1 - profi) + d1 + d2 + hwbImpact + lcoImpact);
-}
-
-function Badge({status}) {
-  const cls = status === "Dokončeno" ? "green" : status === "V realizaci" ? "orange" : status === "Čekám na OKU" ? "yellow" : status === "Storno" ? "black" : "red";
-  return <span className={"badge " + cls}>{status}</span>
-}
-
-function App() {
-  const [users, setUsers] = useStore("oneteam_users", initialUsers);
-  const [orders, setOrders] = useStore("oneteam_orders", initialOrders);
-  const [user, setUser] = useState(null);
-  const [page, setPage] = useState("dashboard");
-  const [loginError, setLoginError] = useState("");
-
-  const visibleOrders = useMemo(() => {
-    if (!user) return [];
-    if (user.role === "seller") return orders.filter(o => o.owner_id === user.id);
-    return orders;
-  }, [user, orders]);
-
-  const dashboard = useMemo(() => {
-    const rows = visibleOrders;
-    return {
-      total: rows.length,
-      done: rows.filter(o => o.status === "Dokončeno").length,
-      storno: rows.filter(o => o.status === "Storno").length,
-      ga: rows.filter(o => o.product_group !== "HW" && o.status !== "Storno").length,
-      hwdev: rows.filter(o => o.product_group === "HW" && o.status !== "Storno").length,
-      commission: rows.filter(o => o.status !== "Storno").reduce((s,o) => s + Number(o.final_commission || 0), 0),
-    }
-  }, [visibleOrders]);
-
-  const login = () => {
-    const u = users.find(x => x.username === document.getElementById("username").value.trim() && x.password === document.getElementById("password").value);
-    if (!u) return setLoginError("Špatné jméno nebo heslo");
-    setUser(u);
-    setPage(u.role === "leader" ? "teamDashboard" : "dashboard");
-  };
-
-  const updateStatus = (id, status) => {
-    setOrders(orders.map(o => o.id === id ? {...o, status} : o));
-  };
-
-  const createOrder = () => {
-    const required = ["order_number", "customer_name", "phone"];
-    let data = Object.fromEntries(new FormData(document.getElementById("orderForm")).entries());
-    let missing = required.filter(k => !data[k]);
-    if (missing.length) return alert("Vyplň povinná pole: číslo objednávky, zákazník, telefon.");
-    const order = {
-      id: Date.now(),
-      owner_id: user.id,
-      ...data,
-      final_commission: calcCommission(data)
-    };
-    setOrders([order, ...orders]);
-    setPage("orders");
-  };
-
-  const resetData = () => {
-    localStorage.clear();
-    location.reload();
-  };
-
-  if (!user) {
-    return <section className="login">
-      <div className="login-card">
-        <div className="brand">MB Sales</div>
-        <h1>OneTeam</h1>
-        <p>Jeden tým. Jeden cíl.</p>
-        <label>Uživatelské jméno</label>
-        <input id="username" defaultValue="leader" />
-        <label>Heslo</label>
-        <input id="password" type="password" defaultValue="demo123" />
-        <button className="btn full" onClick={login}>Přihlásit se</button>
-        <p className="errorText">{loginError}</p>
-        <small>Demo účty: leader / obchodnik / management, heslo demo123</small>
-      </div>
-      <div className="hero">
-        <h2>OneTeam CRM</h2>
-        <p>Online verze připravená pro Vercel.</p>
-      </div>
-    </section>
-  }
-
-  const nav = [
-    ["dashboard","🏠 Dashboard"],
-    ...(user.role === "leader" ? [["teamDashboard","📈 Týmový Dashboard"]] : []),
-    ["orders","📄 Moje objednávky"],
-    ["newOrder","➕ Nová objednávka"],
-    ...(user.role !== "seller" ? [["team","👥 Tým"],["management","🏢 Management"]] : []),
-    ["export","📤 Export Builder"],
-  ];
-
-  return <div className="app">
-    <aside className="side">
-      <div className="logo">MB Sales</div>
-      <div className="sub">OneTeam Online</div>
-      <div className="roleBox">{user.name}<br/><small>{user.role}</small></div>
-      <nav>{nav.map(([id,label]) => <button key={id} className={page===id ? "active" : ""} onClick={()=>setPage(id)}>{label}</button>)}</nav>
-      <button className="ghost" onClick={()=>setUser(null)}>Odhlásit</button>
-    </aside>
-
-    <main className="main">
-      <div className="top">
-        <div>
-          <h1>{nav.find(x => x[0]===page)?.[1].replace(/[^\wěščřžýáíéúůóĚŠČŘŽÝÁÍÉÚŮÓ ]/g,"") || "OneTeam"}</h1>
-          <p>Přepínání Den / Týden / Měsíc je připravené pro další napojení na databázi.</p>
-        </div>
-        <div className="period"><button>◀</button><strong>Dnes</strong><button>▶</button><button className="on">Den</button><button>Týden</button><button>Měsíc</button></div>
-      </div>
-
-      {page === "dashboard" && <Dashboard dashboard={dashboard} />}
-      {page === "teamDashboard" && <TeamDashboard users={users} orders={orders} />}
-      {page === "orders" && <Orders rows={visibleOrders} updateStatus={updateStatus} />}
-      {page === "newOrder" && <NewOrder createOrder={createOrder} />}
-      {page === "team" && <Team users={users} setUsers={setUsers} orders={orders} />}
-      {page === "management" && <Management />}
-      {page === "export" && <Export rows={visibleOrders} resetData={resetData} />}
-    </main>
-  </div>
-}
-
-function Dashboard({dashboard}) {
-  return <div className="cards">
-    <Card title="Objednávky" value={dashboard.total}/>
-    <Card title="Dokončeno" value={dashboard.done}/>
-    <Card title="Storno" value={dashboard.storno}/>
-    <Card title="GA" value={dashboard.ga}/>
-    <Card title="HW/DEV" value={dashboard.hwdev}/>
-    <Card title="Výdělek" value={dashboard.commission + " Kč"}/>
-    <Card title="Schůzky" value="8"/>
-    <Card title="Zrušeno" value="2"/>
-  </div>
-}
-
-function TeamDashboard({users, orders}) {
-  const sellers = users.filter(u => u.role !== "management");
-  return <>
-    <div className="cards">
-      <Card title="Schůzky týmu dnes" value="32"/>
-      <Card title="Proběhlo" value="24"/>
-      <Card title="Zrušeno" value="8"/>
-      <Card title="GA týmu" value={orders.filter(o=>o.product_group!=="HW" && o.status!=="Storno").length}/>
-      <Card title="Denní výdělek týmu" value={orders.filter(o=>o.status!=="Storno").reduce((s,o)=>s+o.final_commission,0)+" Kč"}/>
-    </div>
-    <table className="table"><thead><tr><th>Obchodník</th><th>Objednávky</th><th>Denní výdělek</th><th>Konverze</th></tr></thead><tbody>
-      {sellers.map(u => {
-        const rows = orders.filter(o => o.owner_id === u.id && o.status !== "Storno");
-        return <tr key={u.id}><td>{u.name}</td><td>{rows.length}</td><td><strong>{rows.reduce((s,o)=>s+o.final_commission,0)} Kč</strong></td><td>{u.role==="leader" ? "75 %" : "62 %"}</td></tr>
-      })}
-    </tbody></table>
-  </>
-}
-
-function Orders({rows, updateStatus}) {
-  return <table className="table"><thead><tr><th>Číslo</th><th>Zákazník</th><th>Typ</th><th>Režim</th><th>Produkt</th><th>Tarif</th><th>Stav</th><th>Provize</th><th>Změnit</th></tr></thead><tbody>
-    {rows.map(r => <tr key={r.id}><td>{r.order_number}</td><td>{r.customer_name}</td><td>{r.customer_type}</td><td>{r.deal_type}</td><td>{r.product_group}</td><td>{r.tariff}</td><td><Badge status={r.status}/></td><td>{r.final_commission} Kč</td><td><select value={r.status} onChange={e=>updateStatus(r.id,e.target.value)}><option>Uloženo</option><option>Čekám na OKU</option><option>V realizaci</option><option>Dokončeno</option><option>Storno</option></select></td></tr>)}
-  </tbody></table>
-}
-
-function NewOrder({createOrder}) {
-  const [ctype,setCtype]=useState("RČ");
-  const [deal,setDeal]=useState("Bez Spolu");
-  return <div className="form">
-    <form id="orderForm">
-      <div className="grid">
-        <Field name="order_number" label="Číslo objednávky *"/>
-        <div><label>RČ / IČO</label><select name="customer_type" value={ctype} onChange={e=>{setCtype(e.target.value); if(e.target.value==="RČ" && deal==="O2 Profi") setDeal("Bez Spolu")}}><option>RČ</option><option>IČO</option></select></div>
-        <Field name="customer_name" label="Jméno zákazníka *"/>
-        <Field name="phone" label="Telefon *"/>
-        <div><label>Typ zadání</label><select name="deal_type" value={deal} onChange={e=>setDeal(e.target.value)}><option>Bez Spolu</option><option>O2 Spolu</option>{ctype==="IČO" && <option>O2 Profi</option>}</select></div>
-        <div><label>Produkt</label><select name="product_group"><option>Postpaid</option><option>PRO</option><option>FBB</option><option>TV</option><option>HW</option></select></div>
-        <Field name="tariff" label="Tarif" defaultValue="NEO+ Zlatý"/>
-        <div><label>Status</label><select name="status"><option>Uloženo</option><option>Čekám na OKU</option><option>V realizaci</option><option>Dokončeno</option><option>Storno</option></select></div>
-      </div>
-      {deal === "O2 Profi" && <div className="box">
-        <h3>O2 Profi</h3>
-        <div className="grid">
-          <div><label>Profi %</label><select name="profi_percent"><option value="0">0%</option><option value="0.1">10%</option><option value="0.2">20%</option><option value="0.3">30%</option></select></div>
-          <Field name="hwb_amount" label="HWB" type="number" defaultValue="0"/>
-          <Field name="lco_amount" label="LCO/kredit" type="number" defaultValue="0"/>
-        </div>
-      </div>}
-    </form>
-    <button className="btn" onClick={createOrder}>Uložit objednávku</button>
-  </div>
-}
-
-function Team({users,setUsers,orders}) {
-  const add = () => {
-    const name = prompt("Jméno obchodníka:");
-    if (!name) return;
-    const username = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replaceAll(" ",".");
-    setUsers([...users, {id:Date.now(), name, username, password:"Start123", role:"seller"}]);
-    alert("Vytvořen účet: " + username + " / Start123");
-  }
-  return <>
-    <button className="btn" onClick={add}>+ Přidat obchodníka</button>
-    <table className="table"><thead><tr><th>Jméno</th><th>Login</th><th>Role</th><th>Objednávky</th><th>Výdělek</th><th>Akce</th></tr></thead><tbody>
-      {users.filter(u=>u.role!=="management").map(u => {
-        const rows = orders.filter(o=>o.owner_id===u.id && o.status!=="Storno");
-        return <tr key={u.id}><td>{u.name}</td><td>{u.username}</td><td>{u.role}</td><td>{rows.length}</td><td>{rows.reduce((s,o)=>s+o.final_commission,0)} Kč</td><td><button onClick={()=>alert("Nové heslo: Start123")}>Reset hesla</button></td></tr>
-      })}
-    </tbody></table>
-  </>
-}
-
-function Management() {
-  return <>
-    <div className="cards">
-      <Card title="Domluveno od CC" value="687"/>
-      <Card title="Proběhlo" value="372"/>
-      <Card title="Přesunuto" value="39"/>
-      <Card title="Zrušeno" value="231"/>
-      <Card title="Vlastní" value="45"/>
-      <Card title="Zrušeno CC%" value="33,6 %"/>
-    </div>
-    <table className="table"><thead><tr><th>Obchodník</th><th>Domluveno od CC</th><th>Proběhlo</th><th>Přesunuto</th><th>Zrušeno</th><th>Vlastní</th><th>Zrušeno CC%</th><th>Navolaných KO</th><th>Dovolaných KO</th><th>Cíl KO</th><th>Vlastní/GA</th></tr></thead><tbody>
-      <tr><td>Jan Novák</td><td>80</td><td>42</td><td>0</td><td>34</td><td>6</td><td>43%</td><td>8</td><td>6</td><td>204</td><td>9</td></tr>
-      <tr><td>Petr Svoboda</td><td>27</td><td>19</td><td>1</td><td>11</td><td>4</td><td>41%</td><td>17</td><td>14</td><td>66</td><td>5</td></tr>
-    </tbody></table>
-  </>
-}
-
-function Export({rows,resetData}) {
-  const csv = "data:text/csv;charset=utf-8," + encodeURIComponent("cislo,zakaznik,typ,rezim,produkt,tarif,stav,provize\n" + rows.map(r => [r.order_number,r.customer_name,r.customer_type,r.deal_type,r.product_group,r.tariff,r.status,r.final_commission].join(",")).join("\n"));
-  return <div className="form">
-    <h2>Export Builder</h2>
-    <p>První online verze exportuje objednávky podle role.</p>
-    <a className="btn" href={csv} download="oneteam_orders.csv">Stáhnout CSV</a>
-    <button className="btn danger" onClick={resetData}>Resetovat demo data</button>
-  </div>
-}
-
-function Field({name,label,type="text",defaultValue=""}) {
-  return <div><label>{label}</label><input name={name} type={type} defaultValue={defaultValue}/></div>
-}
-
-function Card({title,value}) { return <div className="card"><h3>{title}</h3><div className="big">{value}</div></div> }
-
-createRoot(document.getElementById("root")).render(<App />);
+import React,{useMemo,useState}from"react";import{createRoot}from"react-dom/client";import"./style.css";
+const U=[{id:1,name:"Team Leader",username:"leader",password:"demo123",role:"leader",active:true},{id:2,name:"Petr Obchodník",username:"obchodnik",password:"demo123",role:"seller",leaderId:1,active:true},{id:3,name:"Martin Novák",username:"martin.novak",password:"demo123",role:"seller",leaderId:1,active:true},{id:4,name:"Vedení",username:"management",password:"demo123",role:"management",active:true}];
+const O=[{id:1,owner_id:2,order_number:"2026-1001",customer_name:"Jan Novák",phone:"777123456",address:"Praha 4",customer_type:"RČ",deal_type:"O2 Spolu",product_group:"Postpaid",tariff:"NEO+ Zlatý",status:"V realizaci",base_commission:1600,spolu_commission:1200,final_commission:1200,created_at:"2026-07-17"},{id:2,owner_id:2,order_number:"2026-1002",customer_name:"Petr Dvořák",phone:"777888999",address:"Brno",customer_type:"IČO",deal_type:"O2 Profi",product_group:"PRO",tariff:"O2 Internet MAX Pro 100",status:"Čekám na OKU",base_commission:1900,profi_percent:.2,hwb_amount:0,lco_amount:0,final_commission:1520,created_at:"2026-07-17"},{id:3,owner_id:2,order_number:"2026-1003",customer_name:"Martin Král",phone:"777555222",address:"Plzeň",customer_type:"RČ",deal_type:"Bez Spolu",product_group:"TV",tariff:"Oneplay Komfort",status:"Dokončeno",base_commission:700,final_commission:700,created_at:"2026-07-16"},{id:4,owner_id:3,order_number:"2026-1004",customer_name:"Eva Malá",phone:"777111222",address:"Praha 9",customer_type:"IČO",deal_type:"O2 Profi",product_group:"PRO",tariff:"O2 Internet MAX Pro 250",status:"Dokončeno",base_commission:1900,profi_percent:.1,hwb_amount:1000,lco_amount:100,final_commission:1287,created_at:"2026-07-17"},{id:5,owner_id:1,order_number:"2026-1005",customer_name:"David Procházka",phone:"777333444",address:"Ostrava",customer_type:"RČ",deal_type:"O2 Spolu",product_group:"FBB",tariff:"O2 Internet MAX 250",status:"Dokončeno",base_commission:1900,spolu_commission:1400,final_commission:1400,created_at:"2026-07-17"}];
+const M=[{id:1,owner_id:2,customer_name:"Jan Novák",phone:"777123456",address:"Praha 4",source:"CC",result:"Prodej",date:"2026-07-17",note:"Čeká na OKU"},{id:2,owner_id:2,customer_name:"Petr Dvořák",phone:"777888999",address:"Brno",source:"Vlastní",result:"Nabídka",date:"2026-07-17",note:"Volat příští týden"},{id:3,owner_id:3,customer_name:"Eva Malá",phone:"777111222",address:"Praha 9",source:"Neovolávání",result:"Prodej",date:"2026-07-17",note:"Hotovo"},{id:4,owner_id:3,customer_name:"Lukáš Černý",phone:"777987654",address:"Praha 5",source:"CC",result:"Zrušeno",date:"2026-07-17",note:"Nedorazil"}];
+const T=[["Postpaid","NEO+ Bílý",900,650],["Postpaid","NEO+ Modrý",1200,850],["Postpaid","NEO+ Zlatý",1600,1200],["PRO","O2 Internet MAX Pro 100",1900,1400],["PRO","O2 Internet MAX Pro 250",1900,1400],["FBB","O2 Internet MAX 100",1900,1400],["FBB","O2 Internet MAX 250",1900,1400],["TV","Oneplay Komfort",700,500],["TV","Oneplay Extra Sport",900,650],["HW","MOBIL na splátky",350,350],["DEV","Development",-500,-500]].map(([group,tariff,base,spolu])=>({group,tariff,base,spolu}));
+const D=[["Postpaid","Bez slevy",0],["Postpaid","Sleva 100 Kč / 12 měsíců",-250],["Postpaid","Sleva 200 Kč / 24 měsíců",-750],["PRO","Bez slevy",0],["PRO","Sleva 100 Kč PRO",-350],["PRO","Sleva 200 Kč PRO",-900],["FBB","Bez slevy",0],["FBB","Sleva 100 Kč net / 24 měsíců",-500],["FBB","Sleva 300 Kč net / 24 měsíců",-1200],["TV","Bez slevy",0],["TV","Sleva TV 100 Kč",-250],["HW","Bez slevy",0],["DEV","Bez slevy",0]].map(([group,label,value])=>({group,label,value}));
+function useStore(k,i){const[v,s]=useState(()=>{try{return JSON.parse(localStorage.getItem(k))||i}catch{return i}});return[v,(x)=>{s(x);localStorage.setItem(k,JSON.stringify(x))}]}
+function calc(x){let b=Number(x.base_commission||0);if(x.deal_type==="O2 Spolu")b=Number(x.spolu_commission||b);let p=x.deal_type==="O2 Profi"?Number(x.profi_percent||0):0,d1=Number(x.discount1||0),d2=Number(x.discount2||0),h=x.deal_type==="O2 Profi"?Number(x.hwb_amount||0):0,l=x.deal_type==="O2 Profi"?Number(x.lco_amount||0):0,hi=h?-(h/1.21/24*3):0,li=l?-(l*3):0;return{base:Math.round(b),hwbImpact:Math.round(hi),lcoImpact:Math.round(li),negative:Math.round(d1+d2+hi+li),final:Math.round(b*(1-p)+d1+d2+hi+li)}}
+function bonus(c){if(c<3e4)return{rate:"0 %",bonus:0,next:3e4};if(c<6e4)return{rate:"10 %",bonus:Math.round(c*.1),next:6e4};if(c<8e4)return{rate:"15 %",bonus:Math.round(c*.15),next:8e4};if(c<1e5)return{rate:"20 %",bonus:Math.round(c*.2),next:1e5};return{rate:"20 % + 10 %",bonus:Math.round(2e4+(c-1e5)*.1),next:null}}
+function Badge({status}){let c=status==="Dokončeno"?"green":status==="V realizaci"?"orange":status==="Čekám na OKU"?"yellow":status==="Storno"?"black":"red";return <span className={"badge "+c}>{status}</span>}
+function stats(o,m){let a=o.filter(x=>x.status!=="Storno"),gross=a.reduce((s,x)=>s+Math.max(0,Number(x.base_commission||x.final_commission||0)),0),clean=a.reduce((s,x)=>s+Number(x.final_commission||0),0),b=bonus(clean);return{orders:o.length,done:o.filter(x=>x.status==="Dokončeno").length,storno:o.filter(x=>x.status==="Storno").length,ga:a.filter(x=>!["HW","DEV"].includes(x.product_group)).length,hwdev:a.filter(x=>["HW","DEV"].includes(x.product_group)).length,gross,clean,neg:clean-gross,bonus:b,meetings:m.length,happened:m.filter(x=>["Prodej","Nabídka"].includes(x.result)).length,cancelled:m.filter(x=>x.result==="Zrušeno").length}}
+function App(){const[users,setUsers]=useStore("ot_users_v2",U),[orders,setOrders]=useStore("ot_orders_v2",O),[meetings,setMeetings]=useStore("ot_meetings_v2",M),[user,setUser]=useState(null),[page,setPage]=useState("dashboard"),[period,setPeriod]=useState("Den"),[err,setErr]=useState("");
+const vo=useMemo(()=>!user?[]:user.role==="seller"?orders.filter(o=>o.owner_id===user.id):user.role==="leader"?orders.filter(o=>o.owner_id===user.id||users.find(u=>u.id===o.owner_id)?.leaderId===user.id):orders,[user,orders,users]);
+const vm=useMemo(()=>!user?[]:user.role==="seller"?meetings.filter(m=>m.owner_id===user.id):user.role==="leader"?meetings.filter(m=>m.owner_id===user.id||users.find(u=>u.id===m.owner_id)?.leaderId===user.id):meetings,[user,meetings,users]);
+function login(){let u=users.find(x=>x.username===document.getElementById("username").value.trim()&&x.password===document.getElementById("password").value&&x.active!==false);if(!u)return setErr("Špatné jméno nebo heslo");setUser(u);setPage(u.role==="leader"?"teamDashboard":u.role==="management"?"management":"dashboard")}
+if(!user)return <section className="login"><div className="login-card"><div className="brand">MB Sales</div><h1>OneTeam</h1><p>Jeden tým. Jeden cíl.</p><label>Uživatelské jméno</label><input id="username" defaultValue="leader"/><label>Heslo</label><input id="password" type="password" defaultValue="demo123"/><button className="btn full" onClick={login}>Přihlásit se</button><p className="errorText">{err}</p><small>leader / obchodnik / management, heslo demo123</small></div><div className="hero"><h2>OneTeam Core</h2><p>Objednávky, schůzky, zákazníci, provize, bonusy, Team Leader a exporty.</p></div></section>;
+let nav=[...(user.role==="leader"?[["teamDashboard","📈 Týmový Dashboard"]]:[]),...(user.role==="management"?[["management","🏢 Management"]]:[]),["dashboard","🏠 Můj Dashboard"],["orders","📄 Moje objednávky"],["newOrder","➕ Nová objednávka"],["meetings","🤝 Schůzky"],["customers","👥 Moji zákazníci"],...(user.role!=="seller"?[["team","🧑‍💼 Obchodníci"],["export","📤 Export Builder"],["rates","💰 Provizní sazebník"]]:[["export","📤 Export"]])];
+return <div className="app"><aside className="side"><div className="logo">MB Sales</div><div className="sub">OneTeam Core v0.2</div><div className="roleBox">{user.name}<br/><small>{user.role}</small></div><nav>{nav.map(([id,l])=><button key={id} className={page===id?"active":""} onClick={()=>setPage(id)}>{l}</button>)}</nav><button className="ghost" onClick={()=>setUser(null)}>Odhlásit</button></aside><main className="main"><div className="top"><div><h1>{nav.find(n=>n[0]===page)?.[1]}</h1><p>{period} · data se zatím ukládají v prohlížeči.</p></div><div className="period"><button>◀</button><strong>Dnes</strong><button>▶</button>{["Den","Týden","Měsíc"].map(p=><button key={p} className={period===p?"on":""} onClick={()=>setPeriod(p)}>{p}</button>)}</div></div>{page==="dashboard"&&<MyDashboard orders={vo} meetings={vm}/>} {page==="teamDashboard"&&<TeamDashboard users={users} orders={vo} meetings={vm}/>} {page==="orders"&&<Orders rows={vo} orders={orders} setOrders={setOrders}/>} {page==="newOrder"&&<NewOrder user={user} orders={orders} setOrders={setOrders}/>} {page==="meetings"&&<Meetings user={user} meetings={vm} allMeetings={meetings} setMeetings={setMeetings}/>} {page==="customers"&&<Customers orders={vo} meetings={vm}/>} {page==="team"&&<Team users={users} setUsers={setUsers} orders={orders} currentUser={user}/>} {page==="export"&&<ExportBuilder rows={vo}/>} {page==="rates"&&<Rates/>} {page==="management"&&<Management users={users} orders={orders} meetings={meetings}/>}</main></div>}
+function MyDashboard({orders,meetings}){let s=stats(orders,meetings),miss=s.bonus.next?Math.max(0,s.bonus.next-s.clean):0;return <><div className="cards"><Card title="Schůzky" value={s.meetings}/><Card title="Proběhlo" value={s.happened}/><Card title="Zrušeno" value={s.cancelled}/><Card title="GA" value={s.ga}/><Card title="HW/DEV" value={s.hwdev}/><Card title="Čisté provize" value={s.clean+" Kč"}/><Card title="Objemový bonus" value={s.bonus.bonus+" Kč"} note={"Pásmo "+s.bonus.rate}/><Card title="Celkem" value={(s.clean+s.bonus.bonus)+" Kč"}/></div><div className="card" style={{marginTop:16}}><h3>Do dalšího bonusového pásma</h3><div className="big">{s.bonus.next?miss+" Kč":"nejvyšší pásmo"}</div><div className="progress"><div style={{width:s.bonus.next?Math.min(100,s.clean/s.bonus.next*100)+"%":"100%"}}/></div><div className="kpiNote">Hrubé: {s.gross} Kč · Negativní dopady: {s.neg} Kč · Čisté: {s.clean} Kč</div></div></>}
+function TeamDashboard({users,orders,meetings}){let us=users.filter(u=>u.role!=="management"),s=stats(orders,meetings);return <><div className="cards"><Card title="Schůzky týmu" value={s.meetings}/><Card title="Proběhlo" value={s.happened}/><Card title="Zrušeno" value={s.cancelled}/><Card title="GA týmu" value={s.ga}/><Card title="HW/DEV" value={s.hwdev}/><Card title="Denní výdělek týmu" value={s.clean+" Kč"}/></div><Table headers={["Obchodník","Schůzky","GA","HW/DEV","Čisté provize","Bonus","Celkem","Konverze"]}>{us.map(u=>{let uo=orders.filter(o=>o.owner_id===u.id),um=meetings.filter(m=>m.owner_id===u.id),st=stats(uo,um);return <tr key={u.id}><td>{u.name}</td><td>{st.meetings}</td><td>{st.ga}</td><td>{st.hwdev}</td><td><strong>{st.clean} Kč</strong></td><td>{st.bonus.bonus} Kč</td><td><strong>{st.clean+st.bonus.bonus} Kč</strong></td><td>{st.meetings?Math.round(st.ga/st.meetings*100):0} %</td></tr>})}</Table></>}
+function Orders({rows,setOrders,orders}){let update=(id,status)=>setOrders(orders.map(o=>o.id===id?{...o,status}:o));return <Table headers={["Číslo","Zákazník","Typ","Režim","Produkt","Tarif","Stav","Provize","Změnit stav"]}>{rows.map(r=><tr key={r.id}><td>{r.order_number}</td><td>{r.customer_name}</td><td>{r.customer_type}</td><td>{r.deal_type}</td><td>{r.product_group}</td><td>{r.tariff}</td><td><Badge status={r.status}/></td><td>{r.final_commission} Kč</td><td><select value={r.status} onChange={e=>update(r.id,e.target.value)}><option>Uloženo</option><option>Čekám na OKU</option><option>V realizaci</option><option>Dokončeno</option><option>Storno</option></select></td></tr>)}</Table>}
+function NewOrder({user,orders,setOrders}){const[ctype,setCtype]=useState("RČ"),[deal,setDeal]=useState("Bez Spolu"),[group,setGroup]=useState("Postpaid"),[tariff,setTariff]=useState(T.find(t=>t.group==="Postpaid")),[form,setForm]=useState({discount1:0,discount2:0,profi_percent:0,hwb_amount:0,lco_amount:0});let gT=T.filter(t=>t.group===group),gD=D.filter(d=>d.group===group),c=calc({...form,deal_type:deal,base_commission:tariff?.base||0,spolu_commission:tariff?.spolu||0});function submit(){let fd=new FormData(document.getElementById("orderForm")),data=Object.fromEntries(fd.entries());if(!data.order_number||!data.customer_name||!data.phone)return alert("Vyplň číslo objednávky, zákazníka a telefon.");if(orders.some(o=>o.order_number===data.order_number))return alert("Toto číslo objednávky už existuje.");let cc=calc({...data,deal_type:deal,base_commission:tariff.base,spolu_commission:tariff.spolu});setOrders([{id:Date.now(),owner_id:user.id,...data,customer_type:ctype,deal_type:deal,product_group:group,tariff:tariff.tariff,base_commission:tariff.base,spolu_commission:tariff.spolu,final_commission:cc.final,created_at:new Date().toISOString().slice(0,10)},...orders]);alert("Objednávka uložena. Provize: "+cc.final+" Kč")}return <div className="form"><form id="orderForm"><div className="grid"><Field name="order_number" label="Číslo objednávky *"/><div><label>RČ / IČO</label><select value={ctype} onChange={e=>{setCtype(e.target.value);if(e.target.value==="RČ"&&deal==="O2 Profi")setDeal("Bez Spolu")}}><option>RČ</option><option>IČO</option></select></div><Field name="customer_name" label="Jméno zákazníka *"/><Field name="phone" label="Telefon *"/><Field name="address" label="Adresa zákazníka"/><div><label>Typ zadání</label><select value={deal} onChange={e=>setDeal(e.target.value)}><option>Bez Spolu</option><option>O2 Spolu</option>{ctype==="IČO"&&<option>O2 Profi</option>}</select></div><div><label>Skupina služeb</label><select value={group} onChange={e=>{setGroup(e.target.value);setTariff(T.find(t=>t.group===e.target.value))}}>{[...new Set(T.map(t=>t.group))].map(g=><option key={g}>{g}</option>)}</select></div><div><label>Tarif</label><select value={tariff?.tariff} onChange={e=>setTariff(gT.find(t=>t.tariff===e.target.value))}>{gT.map(t=><option key={t.tariff}>{t.tariff}</option>)}</select></div><div><label>Sleva 1</label><select name="discount1" value={form.discount1} onChange={e=>setForm({...form,discount1:e.target.value})}>{gD.map(d=><option value={d.value} key={d.label}>{d.label} ({d.value} Kč)</option>)}</select></div><div><label>Sleva 2</label><select name="discount2" value={form.discount2} onChange={e=>setForm({...form,discount2:e.target.value})}>{gD.map(d=><option value={d.value} key={d.label}>{d.label} ({d.value} Kč)</option>)}</select></div><div><label>Status</label><select name="status"><option>Uloženo</option><option>Čekám na OKU</option><option>V realizaci</option><option>Dokončeno</option><option>Storno</option></select></div></div>{deal==="O2 Profi"&&<div className="box"><h3>O2 Profi dohoda</h3><div className="grid"><div><label>Profi sleva %</label><select name="profi_percent" value={form.profi_percent} onChange={e=>setForm({...form,profi_percent:e.target.value})}><option value="0">0 %</option><option value=".05">5 %</option><option value=".1">10 %</option><option value=".15">15 %</option><option value=".2">20 %</option><option value=".25">25 %</option><option value=".3">30 %</option></select></div><Field name="hwb_amount" label="HWB výše v Kč" type="number" value={form.hwb_amount} onChange={e=>setForm({...form,hwb_amount:e.target.value})}/><Field name="lco_amount" label="LCO / kredit v Kč" type="number" value={form.lco_amount} onChange={e=>setForm({...form,lco_amount:e.target.value})}/></div></div>}</form><div className="box"><strong>Výpočet provize:</strong><br/>Základ: {c.base} Kč · Negativní dopady: {c.negative} Kč · HWB: {c.hwbImpact} Kč · LCO: {c.lcoImpact} Kč<br/><span className="big">Finální provize: {c.final} Kč</span></div><button className="btn" onClick={submit}>Uložit objednávku</button></div>}
+function Meetings({user,meetings,allMeetings,setMeetings}){function add(){let fd=new FormData(document.getElementById("meetingForm")),data=Object.fromEntries(fd.entries());if(!data.customer_name)return alert("Vyplň zákazníka.");setMeetings([{id:Date.now(),owner_id:user.id,date:new Date().toISOString().slice(0,10),...data},...allMeetings]);document.getElementById("meetingForm").reset()}return <><div className="form"><h2>Nová schůzka</h2><form id="meetingForm"><div className="grid"><Field name="customer_name" label="Jméno zákazníka"/><Field name="phone" label="Telefon"/><Field name="address" label="Adresa"/><div><label>Zdroj</label><select name="source"><option>CC</option><option>Vlastní</option><option>Neovolávání</option></select></div><div><label>Výsledek</label><select name="result"><option>Prodej</option><option>Nabídka</option><option>Nezájem</option><option>Nekvalita</option><option>Zrušeno</option><option>Přesunuto</option></select></div><Field name="note" label="Komentář"/></div></form><button className="btn" onClick={add}>Uložit schůzku</button></div><Table headers={["Datum","Zákazník","Telefon","Zdroj","Výsledek","Komentář"]}>{meetings.map(m=><tr key={m.id}><td>{m.date}</td><td>{m.customer_name}</td><td>{m.phone}</td><td>{m.source}</td><td>{m.result}</td><td>{m.note}</td></tr>)}</Table></>}
+function Customers({orders,meetings}){let map=new Map();[...orders.map(o=>({name:o.customer_name,phone:o.phone,address:o.address,state:o.status})),...meetings.map(m=>({name:m.customer_name,phone:m.phone,address:m.address,state:m.result}))].forEach(c=>{if(c.name)map.set(c.name,c)});return <Table headers={["Jméno","Telefon","Adresa","Poslední stav"]}>{[...map.values()].map(c=><tr key={c.name}><td>{c.name}</td><td>{c.phone}</td><td>{c.address}</td><td>{c.state}</td></tr>)}</Table>}
+function Team({users,setUsers,orders,currentUser}){function add(){let name=prompt("Jméno obchodníka:");if(!name)return;let username=name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replaceAll(" ",".");setUsers([...users,{id:Date.now(),name,username,password:"Start123",role:"seller",leaderId:currentUser.id,active:true}]);alert("Vytvořen účet: "+username+" / Start123")}return <><button className="btn" onClick={add}>+ Přidat obchodníka</button><Table headers={["Jméno","Login","Role","Stav","Objednávky","Výdělek","Akce"]}>{users.filter(u=>u.role!=="management").map(u=>{let rows=orders.filter(o=>o.owner_id===u.id&&o.status!=="Storno");return <tr key={u.id}><td>{u.name}</td><td>{u.username}</td><td>{u.role}</td><td>{u.active!==false?<Badge status="Dokončeno"/>:<Badge status="Storno"/>}</td><td>{rows.length}</td><td>{rows.reduce((s,o)=>s+o.final_commission,0)} Kč</td><td><button onClick={()=>alert("Nové heslo: Start123")}>Reset</button> <button onClick={()=>setUsers(users.map(x=>x.id===u.id?{...x,active:!x.active}:x))}>{u.active!==false?"Deaktivovat":"Obnovit"}</button></td></tr>})}</Table></>}
+function ExportBuilder({rows}){const[cols,setCols]=useState(["order_number","customer_name","product_group","status","final_commission"]);let labels={order_number:"Číslo objednávky",customer_name:"Zákazník",phone:"Telefon",customer_type:"RČ/IČO",deal_type:"Režim",product_group:"Produkt",tariff:"Tarif",status:"Stav",final_commission:"Provize"};let csv="data:text/csv;charset=utf-8,"+encodeURIComponent(cols.map(c=>labels[c]).join(",")+"\n"+rows.map(r=>cols.map(c=>`"${String(r[c]??"").replaceAll('"','""')}"`).join(",")).join("\n"));return <div className="form"><h2>Export Builder</h2><p>Vyber si, co chceš exportovat.</p><div className="export-grid">{Object.entries(labels).map(([c,l])=><label className="check" key={c}><input type="checkbox" checked={cols.includes(c)} onChange={()=>setCols(cols.includes(c)?cols.filter(x=>x!==c):[...cols,c])}/>{l}</label>)}</div><a className="btn" href={csv} download="oneteam_export.csv">Stáhnout CSV</a></div>}
+function Rates(){return <div className="form"><h2>Provizní sazebník</h2><p>V této online v0.2 je sazebník vložený v aplikaci. Další verze napojí skutečný import Excelu.</p><input type="file" accept=".xlsx,.xls"/><button className="btn gray" onClick={()=>alert("Import Excelu bude v další backend verzi.")}>Nahrát sazebník</button></div>}
+function Management({users,orders,meetings}){return <><div className="cards"><Card title="Domluveno od CC" value={meetings.filter(m=>m.source==="CC").length}/><Card title="Proběhlo" value={meetings.filter(m=>["Prodej","Nabídka"].includes(m.result)).length}/><Card title="Přesunuto" value={meetings.filter(m=>m.result==="Přesunuto").length}/><Card title="Zrušeno" value={meetings.filter(m=>m.result==="Zrušeno").length}/><Card title="Vlastní" value={meetings.filter(m=>m.source==="Vlastní").length}/><Card title="GA" value={orders.filter(o=>!["HW","DEV"].includes(o.product_group)&&o.status!=="Storno").length}/></div><Table headers={["Obchodník","Domluveno od CC","Proběhlo","Přesunuto","Zrušeno","Vlastní","Zrušeno CC%","GA"]}>{users.filter(u=>u.role!=="management").map(u=>{let ms=meetings.filter(m=>m.owner_id===u.id),os=orders.filter(o=>o.owner_id===u.id),cc=ms.filter(m=>m.source==="CC").length,z=ms.filter(m=>m.result==="Zrušeno").length;return <tr key={u.id}><td>{u.name}</td><td>{cc}</td><td>{ms.filter(m=>["Prodej","Nabídka"].includes(m.result)).length}</td><td>{ms.filter(m=>m.result==="Přesunuto").length}</td><td>{z}</td><td>{ms.filter(m=>m.source==="Vlastní").length}</td><td>{cc?Math.round(z/cc*100):0}%</td><td>{os.filter(o=>!["HW","DEV"].includes(o.product_group)&&o.status!=="Storno").length}</td></tr>})}</Table></>}
+function Table({headers,children}){return <div className="table-wrap"><table className="table"><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>}
+function Card({title,value,note}){return <div className="card"><h3>{title}</h3><div className="big">{value}</div>{note&&<div className="small">{note}</div>}</div>}
+function Field({name,label,type="text",defaultValue="",value,onChange}){return <div><label>{label}</label><input name={name} type={type} defaultValue={defaultValue} value={value} onChange={onChange}/></div>}
+createRoot(document.getElementById("root")).render(<App/>);

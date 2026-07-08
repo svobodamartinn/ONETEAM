@@ -1,6 +1,7 @@
 {
-  "name": "oneteam-vercel-static",
-  "version": "0.1.0",
+  "name": "oneteam-core-online-v02",
+  "version": "0.2.0",
+  "private": true,
   "scripts": {
     "start": "vite --host 0.0.0.0",
     "build": "vite build",
@@ -11,6 +12,5 @@
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest"
-  },
-  "devDependencies": {}
+  }
 }
